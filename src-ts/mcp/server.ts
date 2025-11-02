@@ -18,7 +18,8 @@ import {
 import { MoegirlClient } from '../core/moegirl_client.js';
 import { WikiTextCleaner } from '../core/wikitext_cleaner.js';
 import { CacheManager } from '../core/cache_manager.js';
-import { SearchParams, PageParams, ServerStats, MCPToolResponse } from '../types/index.js';
+import { PageContentParser } from '../core/page_content_parser.js';
+import { SearchParams, PageParams, PageStructureParams, PageSectionsParams, ServerStats, MCPToolResponse } from '../types/index.js';
 
 export class MoegirlMCPServer {
   private server: Server;
@@ -170,6 +171,44 @@ export class MoegirlMCPServer {
           ]
         }
       },
+      {
+        name: 'get_page_sections',
+        description: '根据标题或模板名称获取萌娘百科页面指定内容',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pageid: {
+              type: 'number',
+              description: '页面ID（与title二选一）'
+            },
+            title: {
+              type: 'string',
+              description: '页面标题（与pageid二选一）'
+            },
+            section_titles: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '要获取的标题列表，支持部分匹配'
+            },
+            template_names: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '要获取的模板名称列表，支持部分匹配'
+            },
+            max_length: {
+              type: 'number',
+              description: '最大返回字符数，默认5000',
+              default: 5000,
+              minimum: 100,
+              maximum: 20000
+            }
+          },
+          oneOf: [
+            { required: ['pageid'] },
+            { required: ['title'] }
+          ]
+        }
+      },
     ];
   }
 
@@ -187,6 +226,9 @@ export class MoegirlMCPServer {
       
       case 'get_page':
         return await this.handleGetPage(args);
+      
+      case 'get_page_sections':
+        return await this.handleGetPageSections(args);
       
       default:
         throw new Error(`未知工具: ${name}`);
@@ -243,7 +285,7 @@ export class MoegirlMCPServer {
       return {
         content: [{
           type: 'text',
-          text: this.formatPageContent(cachedPage, max_length)
+          text: this.formatPageContentWithTOC(cachedPage, max_length)
         }]
       };
     }
@@ -267,12 +309,162 @@ export class MoegirlMCPServer {
     return {
       content: [{
         type: 'text',
-        text: this.formatPageContent(pageContent, max_length)
+        text: this.formatPageContentWithTOC(pageContent, max_length)
       }]
     };
   }
 
   
+
+  /**
+   * 处理获取页面段落
+   */
+  private async handleGetPageSections(args: any): Promise<MCPToolResponse> {
+    const { pageid, title, section_titles = [], template_names = [], max_length = 5000 } = args;
+
+    if (section_titles.length === 0 && template_names.length === 0) {
+      throw new Error('必须提供 section_titles 或 template_names 参数');
+    }
+
+    // 检查缓存
+    const cacheKey = CacheManager.buildDocKey(pageid || title);
+    const cachedPage = this.cache.get(cacheKey);
+    
+    let pageContent: any;
+    
+    if (cachedPage) {
+      console.log(`📋 使用缓存页面: ${pageid || title}`);
+      pageContent = cachedPage;
+    } else {
+      // 获取页面内容
+      const pageParams: PageParams = { pageid, title };
+      pageContent = await this.client.getPageContent(pageParams);
+
+      if (!pageContent) {
+        throw new Error(`页面获取失败: ${pageid || title}`);
+      }
+
+      // 缓存结果
+      this.cache.set(cacheKey, pageContent);
+    }
+
+    // 解析页面结构
+    const structure = PageContentParser.parsePage(pageContent.title, pageContent.content);
+
+    // 收集请求的内容
+    const results: string[] = [];
+
+    // 获取指定标题的内容
+    for (const titleQuery of section_titles) {
+      const content = PageContentParser.getContentByTitle(structure, titleQuery);
+      if (content) {
+        results.push(`📖 ${titleQuery}\n${'='.repeat(titleQuery.length + 3)}\n\n${content}`);
+      }
+    }
+
+    // 获取指定模板的内容
+    for (const templateQuery of template_names) {
+      const templates = PageContentParser.findTemplatesByName(structure, templateQuery);
+      for (const template of templates) {
+        results.push(`🔧 模板: ${template.name}\n${'='.repeat(template.name.length + 5)}\n\n${template.fullText}`);
+      }
+    }
+
+    if (results.length === 0) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ 未找到匹配的标题或模板\n\n搜索的标题: ${section_titles.join(', ')}\n搜索的模板: ${template_names.join(', ')}`
+        }]
+      };
+    }
+
+    const combinedContent = results.join('\n\n' + '-'.repeat(50) + '\n\n');
+    
+    // 限制内容长度
+    let finalContent = combinedContent;
+    if (combinedContent.length > max_length) {
+      finalContent = combinedContent.substring(0, max_length);
+      const remaining = combinedContent.length - max_length;
+      finalContent += `\n\n... (剩余 ${remaining} 字符未显示，可增加 max_length 参数查看完整内容)`;
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: finalContent
+      }]
+    };
+  }
+
+  /**
+   * 格式化页面结构
+   */
+  private formatPageStructure(structure: any): string {
+    let text = `📋 ${structure.title} 页面结构\n`;
+    text += '=' .repeat(structure.title.length + 7) + '\n\n';
+    
+    // 添加目录
+    text += structure.toc + '\n';
+    
+    // 添加模板统计
+    if (structure.templates.length > 0) {
+      text += '\n🔧 模板列表\n';
+      text += '-'.repeat(10) + '\n';
+      
+      const templateCount = new Map<string, number>();
+      structure.templates.forEach(template => {
+        templateCount.set(template.name, (templateCount.get(template.name) || 0) + 1);
+      });
+      
+      Array.from(templateCount.entries()).forEach(([name, count]) => {
+        text += `• ${name} (${count}个)\n`;
+      });
+    }
+    
+    // 添加段落统计
+    text += '\n📊 内容统计\n';
+    text += '-'.repeat(10) + '\n';
+    text += `• 总段落数: ${structure.sections.length}\n`;
+    text += `• 标题数量: ${structure.headings.length}\n`;
+    text += `• 模板数量: ${structure.templates.length}\n`;
+    text += `• 内容长度: ${structure.sections.reduce((sum, section) => sum + section.content.length, 0)} 字符\n`;
+    
+    return text;
+  }
+
+  /**
+   * 格式化页面内容（包含目录）
+   */
+  private formatPageContentWithTOC(page: any, maxLength: number = 2000): string {
+    // 解析页面结构
+    const structure = PageContentParser.parsePage(page.title, page.content);
+    
+    let text = '';
+    
+    // 添加目录
+    if (structure.toc && structure.headings.length > 0) {
+      text += structure.toc + '\n\n';
+    }
+    
+    // 添加页面内容
+    const content = page.cleaned_content || page.content;
+    
+    text += `📖 ${page.title}
+`;
+    text += '=' .repeat(page.title.length + 3) + '\n\n';
+    
+    if (content.length > maxLength) {
+      text += content.substring(0, maxLength);
+      const remaining = content.length - maxLength;
+      text += `\n\n... (剩余 ${remaining} 字符未显示，可使用 get_page_sections 获取特定部分内容)`;
+    } else {
+      text += content;
+      text += `\n\n(完整内容，共 ${content.length} 字符)`;
+    }
+
+    return text;
+  }
 
   /**
    * 格式化搜索结果
@@ -355,6 +547,13 @@ export class MoegirlMCPServer {
         name: '页面帮助',
         description: '页面获取功能使用说明',
         mimeType: 'text/plain'
+      },
+      
+      {
+        uri: 'help://sections',
+        name: '段落帮助',
+        description: '页面段落获取功能使用说明',
+        mimeType: 'text/plain'
       }
     ];
   }
@@ -381,6 +580,15 @@ export class MoegirlMCPServer {
             uri,
             mimeType: 'text/plain',
             text: this.getPageHelpText()
+          }]
+        };
+
+      case 'help://sections':
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/plain',
+            text: this.getSectionsHelpText()
           }]
         };
 
@@ -436,12 +644,60 @@ get_page(title="芙宁娜")
 get_page(title="原神", clean_content=false)
 get_page(title="原神", max_length=5000)
 
+返回内容:
+- 页面目录（自动生成）
+- 页面开头内容
+- 内容长度和状态信息
+
 注意事项:
 - 页面内容会自动缓存30分钟
+- 自动在内容开头包含页面目录，便于导航
 - clean_content=true 时会移除MediaWiki标记
 - max_length 控制返回内容的字符数量
-- 内容被截断时会显示剩余字符数
+- 内容被截断时会提示使用 get_page_sections 获取特定部分
 - 支持中文和英文页面标题
+- 适用于长页面的快速概览和导航
+`;
+  }
+
+  
+
+  /**
+   * 获取页面段落帮助文本
+   */
+  private getSectionsHelpText(): string {
+    return `萌娘百科页面段落获取功能使用说明
+
+工具: get_page_sections
+
+参数:
+- pageid (可选): 页面ID，数字类型
+- title (可选): 页面标题，字符串类型
+- section_titles (可选): 要获取的标题列表，支持部分匹配
+- template_names (可选): 要获取的模板名称列表，支持部分匹配
+- max_length (可选): 最大返回字符数，默认5000，范围100-20000
+
+使用规则:
+- pageid 和 title 必须提供其中一个
+- section_titles 和 template_names 必须至少提供一个
+- 支持同时获取多个标题和模板内容
+
+使用示例:
+get_page_sections(title="芙宁娜", section_titles=["命之座", "天赋"])
+get_page_sections(title="原神", template_names=["原神角色"])
+get_page_sections(pageid=12345, section_titles=["简介"], template_names=["Cquote"])
+
+返回内容:
+- 指定标题下的完整内容
+- 指定模板的完整定义
+- 内容按请求顺序排列，用分隔线分开
+
+注意事项:
+- 页面内容会自动缓存30分钟
+- 标题匹配支持部分匹配（包含关系）
+- 模板名称匹配支持部分匹配
+- 适用于获取页面的特定部分内容
+- 避免返回整个长页面，提高效率
 `;
   }
 
@@ -455,12 +711,18 @@ get_page(title="原神", max_length=5000)
       // 检查API连接
       const isConnected = await this.client.checkConnection();
       if (!isConnected) {
-        throw new Error('萌娘百科API连接失败');
+        console.error('\n💡 启动提示:');
+        console.error('   MCP服务器将尝试启动，但API功能可能不可用');
+        console.error('   这通常是由于萌娘百科服务器暂时不可用导致的');
+        console.error('   您可以稍后重启服务器，或等待萌娘百科服务恢复\n');
+        
+        // 不抛出错误，允许服务器启动但标记API不可用
+        this.isInitialized = false;
+      } else {
+        console.log('✅ 萌娘百科API连接正常');
+        this.isInitialized = true;
       }
 
-      console.log('✅ 萌娘百科API连接正常');
-
-      this.isInitialized = true;
       console.log('✅ MCP 服务器初始化完成');
 
       // 连接传输层

@@ -16,10 +16,8 @@ export class MoegirlClient {
       baseURL: this.apiEndpoint,
       timeout: 15000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate'
+        'User-Agent': 'MoegirlWiki-MCP/0.2.0',
+        'Accept': 'application/json'
       }
     });
   }
@@ -172,19 +170,55 @@ export class MoegirlClient {
    * @returns 连接状态
    */
   async checkConnection(): Promise<boolean> {
-    try {
-      const response = await this.api.get('', {
-        params: {
-          action: 'query',
-          format: 'json',
-          meta: 'siteinfo'
-        }
-      });
+    const maxRetries = 3;
+    let retryDelay = 1000; // 1秒
 
-      return response.status === 200 && !!response.data.query;
-    } catch (error) {
-      console.error(`❌ [${this.siteName}] API连接检查失败:`, error);
-      return false;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔗 [${this.siteName}] 正在检查API连接 (尝试 ${attempt}/${maxRetries})...`);
+        
+        const response = await this.api.get('', {
+          params: {
+            action: 'query',
+            format: 'json',
+            meta: 'siteinfo'
+          },
+          timeout: 10000 // 10秒超时
+        });
+
+        if (response.status === 200 && !!response.data.query) {
+          console.log(`✅ [${this.siteName}] API连接正常`);
+          return true;
+        }
+      } catch (error) {
+        console.error(`❌ [${this.siteName}] API连接检查失败 (尝试 ${attempt}/${maxRetries}):`, error.message);
+        
+        if (attempt < maxRetries) {
+          console.log(`⏳ [${this.siteName}] ${retryDelay}ms后重试...`);
+          await this.sleep(retryDelay);
+          retryDelay *= 2; // 指数退避
+        }
+      }
     }
+
+    console.error(`❌ [${this.siteName}] API连接检查最终失败`);
+    console.error(`💡 可能的原因:`);
+    console.error(`   1. 萌娘百科服务器暂时不可用 (503/502错误)`);
+    console.error(`   2. 网络连接问题`);
+    console.error(`   3. API接口暂时维护`);
+    console.error(`🔧 建议操作:`);
+    console.error(`   - 稍后重试`);
+    console.error(`   - 检查网络连接`);
+    console.error(`   - 访问 https://zh.moegirl.org.cn 确认网站状态`);
+    
+    return false;
+  }
+
+  /**
+   * 延迟函数
+   * @param ms 延迟毫秒数
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

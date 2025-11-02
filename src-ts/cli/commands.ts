@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { MoegirlClient } from '../core/moegirl_client.js';
 import { WikiTextCleaner } from '../core/wikitext_cleaner.js';
 import { CacheManager } from '../core/cache_manager.js';
+import { PageContentParser } from '../core/page_content_parser.js';
 import { SearchParams, PageParams } from '../types/index.js';
 
 export class CLICommands {
@@ -81,6 +82,21 @@ export class CLICommands {
         await this.handleCacheClearCommand(options);
       });
 
+    // 页面段落命令
+    program
+      .command('section')
+      .description('获取萌娘百科页面指定标题或模板的内容')
+      .argument('<identifier>', '页面ID或标题')
+      .option('--id', '将参数作为页面ID处理')
+      .option('-t, --titles <titles...>', '要获取的标题列表，支持部分匹配')
+      .option('-p, --templates <templates...>', '要获取的模板名称列表，支持部分匹配')
+      .option('-l, --limit <number>', '最大返回字符数', '5000')
+      .option('--json', '输出 JSON 格式')
+      .option('--no-cache', '不使用缓存')
+      .action(async (identifier, options) => {
+        await this.handleSectionCommand(identifier, options);
+      });
+
     // 连接测试命令
     program
       .command('test')
@@ -89,13 +105,6 @@ export class CLICommands {
         await this.handleTestCommand();
       });
 
-    // MCP 服务器模式
-    program
-      .command('mcp')
-      .description('启动 MCP 服务器模式')
-      .action(async () => {
-        await this.handleMCPCommand();
-      });
   }
 
   /**
@@ -113,7 +122,7 @@ export class CLICommands {
       if (useCache) {
         const cacheKey = CacheManager.buildSearchKey(keyword, limit);
         const cachedResult = this.cache.get(cacheKey);
-        
+
         if (cachedResult && Array.isArray(cachedResult)) {
           console.log('📋 使用缓存结果');
           this.displaySearchResults(cachedResult, options.json);
@@ -161,7 +170,7 @@ export class CLICommands {
       if (useCache) {
         const cacheKey = CacheManager.buildDocKey(identifier);
         const cachedPage = this.cache.get(cacheKey);
-        
+
         if (cachedPage) {
           console.log('📋 使用缓存页面');
           this.displayPageContent(cachedPage, options.json, cleanContent, maxLength);
@@ -170,8 +179,8 @@ export class CLICommands {
       }
 
       // 获取页面内容
-      const pageParams: PageParams = useId ? 
-        { pageid: parseInt(identifier) } : 
+      const pageParams: PageParams = useId ?
+        { pageid: parseInt(identifier) } :
         { title: identifier };
 
       const pageContent = await this.client.getPageContent(pageParams);
@@ -224,7 +233,7 @@ export class CLICommands {
    */
   private async handleCacheClearCommand(options: any): Promise<void> {
     let cleanedCount = 0;
-    
+
     if (options.all) {
       const size = this.cache.size();
       this.cache.clear();
@@ -245,50 +254,32 @@ export class CLICommands {
 
     try {
       const isConnected = await this.client.checkConnection();
-      
+
       if (isConnected) {
         console.log('✅ API连接正常');
-        
+
         // 执行一个简单搜索测试
         console.log('\n🔍 执行搜索测试...');
         const testResults = await this.client.search({ keyword: '测试', limit: 1 });
-        
+
         if (testResults.length > 0) {
           console.log('✅ 搜索功能正常');
           console.log(`   找到 ${testResults.length} 个结果`);
         } else {
           console.log('⚠️ 搜索功能异常（无结果）');
         }
-        
+
       } else {
         console.log('❌ API连接失败');
         process.exit(1);
       }
-      
+
     } catch (error) {
       console.error(`❌ 连接测试失败: ${error}`);
       process.exit(1);
     }
   }
 
-  /**
-   * 处理 MCP 服务器命令
-   */
-  private async handleMCPCommand(): Promise<void> {
-    try {
-      console.log('🚀 启动萌娘百科 MCP 服务器模式...\n');
-
-      // 动态导入 MCP 服务器
-      const { MoegirlMCPServer } = await import('../mcp/server.js');
-      const mcpServer = new MoegirlMCPServer();
-
-      await mcpServer.start();
-
-    } catch (error) {
-      console.error(`❌ MCP 服务器启动失败: ${error}`);
-      process.exit(1);
-    }
-  }
 
   /**
    * 显示搜索结果
@@ -328,8 +319,17 @@ export class CLICommands {
       return;
     }
 
-    const content = cleanContent ? page.cleaned_content || page.content : page.content;
+    // 解析页面结构以获取目录
+    const structure = PageContentParser.parsePage(page.title, page.content);
     
+    // 显示目录
+    if (structure.toc && structure.headings.length > 0) {
+      console.log(structure.toc);
+      console.log();
+    }
+
+    const content = cleanContent ? page.cleaned_content || page.content : page.content;
+
     console.log(`📖 ${page.title}`);
     console.log('='.repeat(page.title.length + 3));
     console.log(`页面ID: ${page.pageid}`);
@@ -340,10 +340,157 @@ export class CLICommands {
     if (content.length > maxLength) {
       console.log(content.substring(0, maxLength));
       const remaining = content.length - maxLength;
-      console.log(`\n... (剩余 ${remaining} 字符未显示)`);
+      console.log(`\n... (剩余 ${remaining} 字符未显示，可使用 section 命令获取特定部分内容)`);
     } else {
       console.log(content);
       console.log(`\n(完整内容，共 ${content.length} 字符)`);
+    }
+  }
+  
+
+  
+
+  /**
+   * 处理页面段落命令
+   */
+  private async handleSectionCommand(identifier: string, options: any): Promise<void> {
+    try {
+      const useId = options.id || /^\d+$/.test(identifier);
+      const useCache = options.cache !== false;
+      const sectionTitles = options.titles || [];
+      const templateNames = options.templates || [];
+      const maxLength = parseInt(options.limit) || 5000;
+
+      if (sectionTitles.length === 0 && templateNames.length === 0) {
+        console.error('❌ 必须提供 --titles 或 --templates 参数');
+        process.exit(1);
+      }
+
+      console.log(`📖 正在获取页面段落: ${identifier} (${useId ? 'ID' : '标题'})`);
+      if (sectionTitles.length > 0) {
+        console.log(`标题: ${sectionTitles.join(', ')}`);
+      }
+      if (templateNames.length > 0) {
+        console.log(`模板: ${templateNames.join(', ')}`);
+      }
+      console.log('='.repeat(50));
+
+      // 检查缓存
+      if (useCache) {
+        const cacheKey = CacheManager.buildDocKey(identifier);
+        const cachedPage = this.cache.get(cacheKey);
+
+        if (cachedPage) {
+          console.log('📋 使用缓存页面');
+          this.displayPageSections(cachedPage, sectionTitles, templateNames, maxLength, options.json);
+          return;
+        }
+      }
+
+      // 获取页面内容
+      const pageParams: PageParams = useId ?
+        { pageid: parseInt(identifier) } :
+        { title: identifier };
+
+      const pageContent = await this.client.getPageContent(pageParams);
+
+      if (!pageContent) {
+        console.error(`❌ 页面获取失败: ${identifier}`);
+        process.exit(1);
+      }
+
+      this.displayPageSections(pageContent, sectionTitles, templateNames, maxLength, options.json);
+
+      // 缓存结果
+      if (useCache) {
+        const cacheKey = CacheManager.buildDocKey(identifier);
+        this.cache.set(cacheKey, pageContent);
+        console.log(`💾 页面已缓存`);
+      }
+
+    } catch (error) {
+      console.error(`❌ 页面段落获取失败: ${error}`);
+      process.exit(1);
+    }
+  }
+
+  
+
+  /**
+   * 显示页面段落
+   */
+  private displayPageSections(page: any, sectionTitles: string[], templateNames: string[], maxLength: number, jsonFormat: boolean): void {
+    const structure = PageContentParser.parsePage(page.title, page.content);
+
+    if (jsonFormat) {
+      const results: any = {
+        page: page.title,
+        requested_sections: {
+          titles: sectionTitles,
+          templates: templateNames
+        },
+        content: {}
+      };
+
+      // 获取指定标题的内容
+      for (const titleQuery of sectionTitles) {
+        const content = PageContentParser.getContentByTitle(structure, titleQuery);
+        if (content) {
+          results.content[titleQuery] = content;
+        }
+      }
+
+      // 获取指定模板的内容
+      for (const templateQuery of templateNames) {
+        const templates = PageContentParser.findTemplatesByName(structure, templateQuery);
+        if (templates.length > 0) {
+          results.content[templateQuery] = templates.map(t => ({
+            name: t.name,
+            fullText: t.fullText,
+            parameters: Object.fromEntries(t.parameters)
+          }));
+        }
+      }
+
+      console.log(JSON.stringify(results, null, 2));
+      return;
+    }
+
+    // 收集请求的内容
+    const results: string[] = [];
+
+    // 获取指定标题的内容
+    for (const titleQuery of sectionTitles) {
+      const content = PageContentParser.getContentByTitle(structure, titleQuery);
+      if (content) {
+        results.push(`📖 ${titleQuery}\n${'='.repeat(titleQuery.length + 3)}\n\n${content}`);
+      }
+    }
+
+    // 获取指定模板的内容
+    for (const templateQuery of templateNames) {
+      const templates = PageContentParser.findTemplatesByName(structure, templateQuery);
+      for (const template of templates) {
+        results.push(`🔧 模板: ${template.name}\n${'='.repeat(template.name.length + 5)}\n\n${template.fullText}`);
+      }
+    }
+
+    if (results.length === 0) {
+      console.log(`❌ 未找到匹配的标题或模板`);
+      console.log(`搜索的标题: ${sectionTitles.join(', ')}`);
+      console.log(`搜索的模板: ${templateNames.join(', ')}`);
+      return;
+    }
+
+    const combinedContent = results.join('\n\n' + '-'.repeat(50) + '\n\n');
+
+    // 限制内容长度
+    if (combinedContent.length > maxLength) {
+      console.log(combinedContent.substring(0, maxLength));
+      const remaining = combinedContent.length - maxLength;
+      console.log(`\n... (剩余 ${remaining} 字符未显示)`);
+    } else {
+      console.log(combinedContent);
     }
   }
 }

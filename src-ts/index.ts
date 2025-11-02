@@ -6,6 +6,7 @@
 export { MoegirlClient } from './core/moegirl_client.js';
 export { WikiTextCleaner } from './core/wikitext_cleaner.js';
 export { CacheManager } from './core/cache_manager.js';
+export { PageContentParser } from './core/page_content_parser.js';
 export { MoegirlMCPServer } from './mcp/server.js';
 export { CLICommands } from './cli/commands.js';
 
