@@ -1,6 +1,6 @@
 {
   "name": "moegirl-wiki-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "萌娘百科 MCP 服务器 - 提供萌娘百科搜索、页面获取等功能的 MCP 服务器",
   "main": "dist/mcp.js",
   "type": "module",

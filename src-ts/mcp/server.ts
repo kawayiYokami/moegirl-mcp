@@ -413,7 +413,7 @@ export class MoegirlMCPServer {
       text += '-'.repeat(10) + '\n';
       
       const templateCount = new Map<string, number>();
-      structure.templates.forEach(template => {
+      structure.templates.forEach((template: any) => {
         templateCount.set(template.name, (templateCount.get(template.name) || 0) + 1);
       });
       
@@ -428,7 +428,8 @@ export class MoegirlMCPServer {
     text += `• 总段落数: ${structure.sections.length}\n`;
     text += `• 标题数量: ${structure.headings.length}\n`;
     text += `• 模板数量: ${structure.templates.length}\n`;
-    text += `• 内容长度: ${structure.sections.reduce((sum, section) => sum + section.content.length, 0)} 字符\n`;
+    text += `• 内容长度: ${structure.sections.reduce((sum: number, section: any) => sum + section.content.length, 0)} 字符
+`;
     
     return text;
   }

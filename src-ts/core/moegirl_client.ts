@@ -191,7 +191,7 @@ export class MoegirlClient {
           return true;
         }
       } catch (error) {
-        console.error(`❌ [${this.siteName}] API连接检查失败 (尝试 ${attempt}/${maxRetries}):`, error.message);
+        console.error(`❌ [${this.siteName}] API连接检查失败 (尝试 ${attempt}/${maxRetries}):`, (error as Error).message);
         
         if (attempt < maxRetries) {
           console.log(`⏳ [${this.siteName}] ${retryDelay}ms后重试...`);
