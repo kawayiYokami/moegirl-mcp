@@ -1,0 +1,49 @@
+{
+  "name": "moegirl-wiki-mcp",
+  "version": "0.1.0",
+  "description": "萌娘百科 MCP 服务器 - 提供萌娘百科搜索、页面获取等功能的 MCP 服务器",
+  "main": "dist/mcp.js",
+  "type": "module",
+  "bin": {
+    "moegirl-cli": "dist/cli.js",
+    "moegirl-mcp": "dist/mcp.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "mcp": "node dist/mcp.js",
+    "test": "node dist/cli.js search 芙宁娜",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "mcp",
+    "server",
+    "moegirl",
+    "萌娘百科",
+    "wiki",
+    "acg",
+    "anime",
+    "comics",
+    "games"
+  ],
+  "author": "yokami618",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0",
+    "commander": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yokami618/wiki_mcp.git"
+  },
+  "homepage": "https://github.com/yokami618/wiki_mcp#readme"
+}
