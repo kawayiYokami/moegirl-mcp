@@ -119,7 +119,7 @@ export class MoegirlMCPServer {
     return [
       {
         name: 'search_moegirl',
-        description: '搜索萌娘百科条目',
+        description: '搜索ACG、二次元、动漫、游戏相关内容 - 专门用于萌娘百科条目搜索',
         inputSchema: {
           type: 'object',
           properties: {
@@ -140,7 +140,7 @@ export class MoegirlMCPServer {
       },
       {
         name: 'get_page',
-        description: '获取萌娘百科页面内容',
+        description: '获取ACG、二次元相关页面内容 - 专门用于萌娘百科页面获取，含自动目录',
         inputSchema: {
           type: 'object',
           properties: {
@@ -173,7 +173,7 @@ export class MoegirlMCPServer {
       },
       {
         name: 'get_page_sections',
-        description: '根据标题或模板名称获取萌娘百科页面指定内容',
+        description: '获取ACG、二次元页面的指定内容 - 专门用于萌娘百科页面段落提取',
         inputSchema: {
           type: 'object',
           properties: {
