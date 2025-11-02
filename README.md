@@ -114,6 +114,21 @@ moegirl-mcp
 node dist/mcp.js
 ```
 
+### Claude Desktop 配置
+
+在 Claude Desktop 的 `claude_desktop_config.json` 文件中添加以下配置：
+
+```json
+{
+  "mcpServers": {
+    "moegirl_wiki_mcp": {
+      "command": "npx",
+      "args": ["-y", "moegirl-wiki-mcp"]
+    }
+  }
+}
+```
+
 ### 可用工具
 
 - `search_moegirl` - 搜索萌娘百科条目
