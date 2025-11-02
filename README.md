@@ -220,6 +220,10 @@ npm run clean
 
 本项目发布为：`moegirlwiki-mcp`
 
+## 使用声明
+
+本项目仅限非商业用途使用。萌娘百科内容受萌娘百科服务条款约束，禁止任何形式的商业利用。
+
 ## 注意事项
 
 1. **网络连接** - 需要能够访问 `zh.moegirl.org.cn`
@@ -251,4 +255,4 @@ npm run build
 
 ## 许可证
 
-MIT License
+GPL-3.0 License
